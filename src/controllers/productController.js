@@ -1,6 +1,21 @@
+const { Readable } = require('stream');
 const Product = require('../models/Product');
 const AppError = require('../utils/AppError');
 const asyncHandler = require('../utils/asyncHandler');
+const cloudinary = require('../config/cloudinary');
+
+const uploadBufferToCloudinary = (buffer, folder) =>
+  new Promise((resolve, reject) => {
+    const stream = cloudinary.uploader.upload_stream(
+      { folder, resource_type: 'image' },
+      (error, result) => {
+        if (error) return reject(error);
+        resolve(result);
+      }
+    );
+
+    Readable.from(buffer).pipe(stream);
+  });
 
 exports.getProducts = asyncHandler(async (req, res) => {
   const { search, category, lowStock } = req.query;
@@ -30,7 +45,10 @@ exports.getProduct = asyncHandler(async (req, res) => {
 
 exports.createProduct = asyncHandler(async (req, res) => {
   const data = { ...req.body, userId: req.user._id };
-  if (req.file) data.image = `/uploads/${req.file.filename}`;
+  if (req.file) {
+    const uploadResult = await uploadBufferToCloudinary(req.file.buffer, 'shop_inventory/products');
+    data.image = uploadResult.secure_url;
+  }
 
   const product = await Product.create(data);
   if (product.stock > 0) {
@@ -57,7 +75,10 @@ exports.updateProduct = asyncHandler(async (req, res) => {
   fields.forEach((f) => {
     if (req.body[f] !== undefined) product[f] = req.body[f];
   });
-  if (req.file) product.image = `/uploads/${req.file.filename}`;
+  if (req.file) {
+    const uploadResult = await uploadBufferToCloudinary(req.file.buffer, 'shop_inventory/products');
+    product.image = uploadResult.secure_url;
+  }
 
   if (req.body.stock !== undefined && Number(req.body.stock) !== oldStock) {
     const newStock = Number(req.body.stock);
